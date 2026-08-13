@@ -1,0 +1,25 @@
+# Rust / Soroban
+/target/
+**/*.rs.bk
+# Per-run ledger snapshots the SDK's test harness writes for debugging failed
+# tests — regenerated every `cargo test`, not meant to be tracked.
+**/test_snapshots/
+# Cargo.lock is intentionally committed (not ignored): Soroban contracts build
+# to a deployable WASM binary, so pinning exact dependency versions matters
+# for reproducible, verifiable builds.
+
+# Next.js frontend (populated in a later step)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.local
+
+# Editor / OS cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Claude Code harness state (not part of the project)
+.claude/

@@ -1,0 +1,8 @@
+# Pins the Rust toolchain for this workspace so every contributor and CI run
+# builds with a compiler new enough to target `wasm32v1-none` — the target
+# soroban-sdk 27+ requires. (Rust 1.82+'s `wasm32-unknown-unknown` enables
+# WASM features the Soroban host doesn't support yet; `wasm32v1-none`,
+# available since Rust 1.84, is the supported replacement.)
+[toolchain]
+channel = "stable"
+targets = ["wasm32v1-none"]

@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "contracts/flashwage_escrow",
+]
+
+# Shared release profile for all Soroban contracts in this workspace.
+# Mirrors the profile recommended by the official soroban-cli project template:
+# small WASM output, overflow checks kept ON (safety > size for money-moving code),
+# and settings tuned for reproducible, deterministic builds.
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+# Same as `release` but keeps debug assertions on, useful when you want panic
+# messages/logs while still testing against an optimized WASM build.
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
