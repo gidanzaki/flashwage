@@ -428,6 +428,17 @@ impl FlashWageEscrow {
         Self::read_escrow(&env, escrow_id)
     }
 
+    /// Read-only: the number of escrows ever created (i.e. the next id that
+    /// will be assigned). There's no index-by-employer/worker on-chain, so
+    /// the frontend uses this to enumerate `0..count` and filter client-side
+    /// — fine at the scale an MVP without a backend indexer needs to handle.
+    pub fn get_escrow_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::EscrowCount)
+            .unwrap_or(0)
+    }
+
     /// Read-only: fetch the platform configuration (admin, accepted assets, fee).
     pub fn get_config(env: Env) -> Result<Config, Error> {
         Self::read_config(&env)

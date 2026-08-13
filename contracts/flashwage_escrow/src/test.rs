@@ -336,3 +336,30 @@ fn get_escrow_missing_id_fails() {
     let result = f.contract.try_get_escrow(&999);
     assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
 }
+
+#[test]
+fn get_escrow_count_tracks_creations() {
+    let f = setup(50);
+    let desc = milestone_desc(&f.env);
+    assert_eq!(f.contract.get_escrow_count(), 0);
+
+    f.contract.create_milestone_escrow(
+        &f.employer,
+        &f.worker,
+        &10_000,
+        &f.token_address,
+        &2_000,
+        &desc,
+    );
+    assert_eq!(f.contract.get_escrow_count(), 1);
+
+    f.contract.create_milestone_escrow(
+        &f.employer,
+        &f.worker,
+        &5_000,
+        &f.token_address,
+        &2_000,
+        &desc,
+    );
+    assert_eq!(f.contract.get_escrow_count(), 2);
+}

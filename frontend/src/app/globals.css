@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/*
+ * FlashWage theme: dark, "deep space" backdrop with a violet-to-cyan accent
+ * gradient (nods to Stellar's own brand palette without copying it exactly).
+ * The app is dark-mode-first — gig payouts happening in seconds felt like it
+ * wanted a control-room aesthetic, not a SaaS-pastel one.
+ */
+:root {
+  --background: #06070f;
+  --background-elevated: #0b0d1c;
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --foreground: #edeef7;
+  --muted: #8d90ab;
+  --muted-strong: #b6b9cf;
+  --accent-violet: #8b6bff;
+  --accent-cyan: #33d6c8;
+  --accent-gradient: linear-gradient(120deg, var(--accent-violet), var(--accent-cyan));
+  --success: #37d67a;
+  --warning: #f5b942;
+  --danger: #f45b6c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  min-height: 100dvh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(139, 107, 255, 0.16), transparent),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(51, 214, 200, 0.12), transparent),
+    radial-gradient(1px 1px at 20% 30%, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 65% 15%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 85% 55%, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 40% 70%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 10% 85%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 92% 80%, rgba(255, 255, 255, 0.3), transparent);
+  background-attachment: fixed, fixed, fixed, fixed, fixed, fixed, fixed, fixed;
+}
+
+::selection {
+  background: var(--accent-violet);
+  color: white;
+}
+
+/* Reusable surface for cards/panels — a slightly-lit slab against the void. */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  backdrop-filter: blur(10px);
+}
+
+.gradient-text {
+  background-image: var(--accent-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.gradient-border {
+  position: relative;
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--accent-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+/* Custom scrollbar so the dark theme doesn't get an ugly light-mode default. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-violet);
+}

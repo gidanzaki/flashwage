@@ -45,13 +45,15 @@ These map roughly to the roadmap in the README, sized so a reviewer (or you) can
 | Milestone | Scope | Size | Status |
 |---|---|---|---|
 | M1 — Escrow contract | Lock/release/cancel logic, deadline auto-release, fee split, full test coverage | M | ✅ Done |
-| M2 — Employer dashboard | Freighter connect, create-escrow form, active escrows list with a release trigger | M | Open |
-| M3 — Worker payout portal | View pending/completed milestones by wallet address, withdraw via a Path Payment into a local stablecoin | M | Open |
-| M4 — Analytics banner | TVL, total disbursements, average settlement time — reading from contract events/state, not hardcoded | S | Open |
+| M2 — Employer dashboard | Freighter connect, create-escrow form, active escrows list with a release trigger | M | ✅ Built — see caveat below |
+| M3 — Worker payout portal | View pending/completed milestones by wallet address, withdraw via a Path Payment into a local stablecoin | M | ✅ Built — see caveat below |
+| M4 — Analytics banner | TVL, total disbursements, average settlement time — reading from contract state, not hardcoded | S | ✅ Built — see caveat below |
+| M7 — First live verification | Deploy the contract to testnet, wire up `.env.local`, and actually click through both dashboards with Freighter against it. This is the milestone that turns "it builds" into "it works" — fixing whatever breaks along the way is the point of it | M | **Open — good place to start** |
 | M5 — Passkey wallet support | Stellar passkey template alongside Freighter, so users without a browser extension can still sign | M | Open |
 | M6 — Admin key hardening | Multi-sig or timelock in front of the admin role, contract upgrade path | L | Open |
+| M8 — Indexed escrow lookup | Replace the client-side `0..get_escrow_count()` scan in `lib/contract.ts` with real event-based (or backend-indexed) lookup | M | Open |
 
-If you're picking up M2 or M3, coordinate in the issue tracker first — they'll likely land around the same time and share wallet-connection code, so it's worth agreeing on that interface before either of you starts.
+**Caveat on M2–M4:** these are written, and they build/typecheck/lint clean, but nobody has deployed the contract and clicked through them against a live network with a real wallet yet — that's M7. If you pick up M7 and find something in the M2–M4 code that doesn't actually work end-to-end, fixing it *is* the contribution; open a PR rather than a bug report if you're already there.
 
 Good first issues (once filed) will be tagged `good-first-issue` — those are intentionally scoped to be doable without a deep-dive into the whole codebase first.
 
