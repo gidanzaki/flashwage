@@ -1,14 +1,17 @@
 # FlashWage
 
+[![CI](https://github.com/gidanzaki/flashwage/actions/workflows/ci.yml/badge.svg)](https://github.com/gidanzaki/flashwage/actions/workflows/ci.yml)
+
 Milestone-based escrow and instant payouts for gig work, built on Stellar and Soroban.
 
 The problem this is chipping away at: a freelancer in Lagos finishes a milestone for a client in Berlin, and then waits. Bank wires take days, cut 3-6% in fees, and go through at least one correspondent bank that has no idea who either of them are. FlashWage puts the payment terms on-chain instead — the employer locks funds up front, the worker gets paid in seconds once the milestone is released, and Stellar's Path Payments let that payout land as a local stablecoin (ARS, BRL, EURC, whatever's usable where the worker actually lives) instead of sitting in USDC they now have to off-ramp themselves.
 
 ## Where things stand
 
-- **A working, tested Soroban escrow contract** (`contracts/flashwage_escrow`) — 16 unit tests, builds clean to a deployable `.wasm`.
-- **A working Next.js frontend** (`frontend/`) — employer dashboard, worker portal, and landing page with a live TVL/disbursement banner. It builds, typechecks, and lints clean, and renders correctly against a locally running dev server.
-- **Not yet done:** nobody has deployed the contract to a live network and clicked through the UI against it with an actual Freighter wallet. The frontend code talks to the contract exactly the way `stellar contract invoke` does in the CLI walkthrough below, but "the TypeScript compiles" and "a real transaction round-trips through Freighter and the RPC" are different claims — only the first one has been verified so far. If you deploy this and hit something that doesn't work end-to-end, that's exactly the kind of report that's useful — open an issue.
+- **A working, tested Soroban escrow contract** (`contracts/flashwage_escrow`) — 17 unit tests, `cargo clippy -D warnings` clean, builds to a deployable `.wasm`. Went through one internal security self-review pass (see [SECURITY.md](SECURITY.md)) that caught and fixed a checks-effects-interactions ordering issue before it shipped anywhere.
+- **A working Next.js frontend** (`frontend/`) — employer dashboard, worker portal, and landing page with a live TVL/disbursement banner. 33 unit tests on the sharpest-edged logic (bigint/decimal amount conversion, the contract's on-chain status decoding). Builds, typechecks, and lints clean.
+- **CI** (`.github/workflows/ci.yml`) runs all of the above — contract fmt/clippy/test/build and frontend lint/test/build — on every push and PR.
+- **Deployed and exercised end-to-end on testnet** — not just simulated. A real escrow was created, released, and read back through the frontend's actual `contract.ts` code (not a reimplementation), and it caught a real bug: see "Live on testnet" below.
 
 I'd rather the README describe what actually exists than read like a pitch deck, so the sections below say what's been run, not just what's been written.
 
@@ -35,19 +38,43 @@ sequenceDiagram
 
 If the deadline passes and nobody has released the funds, the employer can instead call `cancel_escrow` to get a full refund — but only after the deadline, so an employer can't unilaterally yank funds out from under a worker who's still mid-milestone.
 
+## Live on testnet
+
+A real instance is deployed and initialized on Stellar testnet, accepting the native XLM Stellar Asset Contract as its (only, for now) token — using the native asset instead of a custom USDC issuance means it needed zero setup on top of a funded testnet account, so this can be redeployed identically by anyone.
+
+```
+Contract ID: CAT4NSNCSHGLUOLIEWB2AIGEJP3K4PBJPSORH4VBQUIHEMJK5IBYLOQN
+Network:     Test SDF Network ; September 2015
+Accepted asset (native XLM SAC): CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+```
+
+You can point `frontend/.env.local` at this right now (`NEXT_PUBLIC_ESCROW_CONTRACT_ID` + `NEXT_PUBLIC_USDC_CONTRACT_ID` both set to the values above, `NEXT_PUBLIC_USDC_ASSET_CODE=native`) and see real, previously-created escrows render in the UI. This is a testnet demo deployment, not a production commitment — it may get redeployed or reset as the contract changes.
+
+**What actually got verified against it**, via `stellar contract invoke` and by calling the frontend's own `lib/contract.ts` functions directly against the live RPC (not a reimplementation, not mocked):
+
+- `initialize`, `create_milestone_escrow`, `release_payout`, `get_escrow`, `get_escrow_count` all executed as real signed transactions and settled.
+- The fee split happened correctly on-chain: a 10 XLM escrow released 9.95 XLM to the worker and 0.05 XLM to the fee vault — exactly the 0.5% configured, verified against the worker's actual Horizon balance before and after, not just the contract's return value.
+- The frontend's read path (`fetchConfig`, `fetchEscrow`, `fetchEscrowCount`, `fetchEscrowsForAddress`) and write path (`createMilestoneEscrow`) both round-tripped correctly through the real RPC.
+
+**This is also where a real bug turned up.** `lib/contract.ts` originally read a Result-returning contract call's `.result` as the value directly. Against a live contract, every such call (`get_escrow`, `get_config`, `create_milestone_escrow`, `release_payout`, `cancel_escrow` — everything except `get_escrow_count`, which isn't `Result`-typed) actually returns a `Result<T, Error>` wrapper object (`.unwrap()` / `.isOk()` / `.isErr()`), not `T` directly — a real, documented `@stellar/stellar-sdk` contract-client behavior that no amount of type-checking or unit testing against mocked data would have caught, because the mock would have encoded the same wrong assumption. Fixed by unwrapping properly at every call site. This is exactly the class of bug "the frontend was never tested against a live contract" predicts, and exactly why that gap mattered more than a clean `npm run build`.
+
+Separately, this pass also turned up and fixed a **critical unauthenticated RCE** in the pinned Next.js version (`GHSA-p293-qw3h-jr36`, fixed in 16.3.5) and a high-severity `js-yaml` issue, both via `npm audit` — unrelated to the contract work, but the kind of thing that only surfaces when someone actually runs the tooling instead of leaving a lockfile untouched.
+
 ## Repo layout
 
 ```
 flashwage/
+├── .github/workflows/ci.yml  # fmt/clippy/test/build + lint/test/build, on every push/PR
 ├── contracts/
 │   └── flashwage_escrow/   # Soroban contract: escrow, split payouts, deadlines
 │       ├── src/lib.rs      # contract logic, documented inline
-│       └── src/test.rs     # 16 unit tests covering the auth/deadline matrix
+│       └── src/test.rs     # 17 unit tests covering the auth/deadline matrix
 ├── frontend/               # Next.js app (App Router, TypeScript, Tailwind)
 │   ├── src/app/            # landing page, /employer, /worker routes
 │   ├── src/components/     # wallet connect, escrow cards, withdraw flow, ...
 │   └── src/lib/            # Freighter wallet, contract client, Path Payment helpers
 ├── docs/                   # longer-form notes, architecture decisions
+├── SECURITY.md             # self-review log, known accepted risks, how to report a vuln
 ├── rust-toolchain.toml     # pins the compiler + wasm target the contract needs
 └── Cargo.toml              # workspace root
 ```
@@ -62,7 +89,7 @@ You'll need Rust (the toolchain is pinned in `rust-toolchain.toml`, so `rustup` 
 cargo install --locked stellar-cli
 
 # 2. Clone and build.
-git clone https://github.com/<your-org>/flashwage.git
+git clone https://github.com/gidanzaki/flashwage.git
 cd flashwage
 cargo build -p flashwage-escrow --target wasm32v1-none --release
 
@@ -70,7 +97,7 @@ cargo build -p flashwage-escrow --target wasm32v1-none --release
 cargo test -p flashwage-escrow
 ```
 
-That should give you a green run of 16 tests and a `.wasm` file at `target/wasm32v1-none/release/flashwage_escrow.wasm`.
+That should give you a green run of 17 tests and a `.wasm` file at `target/wasm32v1-none/release/flashwage_escrow.wasm`.
 
 ### Deploying to testnet
 
@@ -116,7 +143,7 @@ Open `http://localhost:3000`. The landing page's stat cards and both `/employer`
 
 Local off-ramp currencies (ARS/BRL/EURC) are optional — leave an issuer blank in `.env.local` and that currency just won't show up in the worker's withdrawal dropdown. All of this is documented inline in `.env.local.example`.
 
-`npm run build` and `npm run lint` are both clean as of this commit; that's the level of verification this frontend has actually had — see "Where things stand" above for what hasn't been tested yet.
+`npm run build`, `npm run lint`, and `npm run test` are all clean as of this commit, and the contract-talking code (`lib/contract.ts`'s reads and writes) has been exercised against a real deployed contract — see "Live on testnet" above. What's still unverified is specifically the browser/Freighter half: nobody has clicked the UI's own buttons with the extension installed, as opposed to calling the same underlying functions directly the way that verification did.
 
 ## Contract interface
 
@@ -135,10 +162,15 @@ The "anyone can release after the deadline" rule is deliberate, not an oversight
 ## Testing
 
 ```bash
-cargo test -p flashwage-escrow
+cargo test -p flashwage-escrow      # contract: 17 tests
+cd frontend && npm run test          # frontend: 33 tests
 ```
 
-Covers initialization (including double-init and an over-the-cap fee getting rejected), fee-split math on release, the auto-release-after-deadline path triggered by a non-employer/admin caller, unauthorized early release, cancel-before-deadline being rejected, and a few not-found/invalid-input edge cases. If you're adding a new code path to the contract, add a test alongside it — see [CONTRIBUTING.md](CONTRIBUTING.md) for the specifics.
+The contract suite covers initialization (including double-init, an over-the-cap fee, and too many accepted assets all getting rejected), fee-split math on release, the auto-release-after-deadline path triggered by a non-employer/admin caller, unauthorized early release, and cancel-before-deadline being rejected.
+
+The frontend suite is narrower and deliberately aimed at the two places a silent bug would be most damaging: `lib/format.ts`'s bigint↔decimal-string conversion (every amount that crosses the wallet/contract boundary goes through this) and `lib/contract.ts`'s raw-ScVal-to-native decoding (in particular the `EscrowStatus` enum, whose wire format was confirmed by reading the `soroban-sdk-macros` source directly rather than assumed). It doesn't yet cover the wallet-connection or Path Payment flows, which need a browser and a live RPC to exercise meaningfully.
+
+Both suites, plus lint and the wasm build, run in CI (`.github/workflows/ci.yml`) on every push and PR. If you're adding a new code path, add a test alongside it — see [CONTRIBUTING.md](CONTRIBUTING.md) for the specifics.
 
 ## Roadmap
 
@@ -146,7 +178,11 @@ Covers initialization (including double-init and an over-the-cap fee getting rej
 - [x] Employer dashboard (Freighter connect, create/manage escrows)
 - [x] Worker payout portal (view milestones, withdraw via Path Payment to a local stablecoin)
 - [x] TVL / disbursement / settlement-time metrics banner
-- [ ] First live testnet deployment + an actual click-through with Freighter (see "Where things stand")
+- [x] CI (contract fmt/clippy/test/build + frontend lint/test/build) on every push/PR
+- [x] Frontend unit test coverage for the bigint/decimal and ScVal-decoding logic
+- [x] One internal contract security self-review pass (see [SECURITY.md](SECURITY.md))
+- [x] First live testnet deployment, contract calls verified end-to-end (see "Live on testnet")
+- [ ] An actual browser click-through with the Freighter extension installed (everything so far has called the same underlying functions directly, not through the UI's buttons)
 - [ ] Passkey wallet support alongside Freighter
 - [ ] Multi-sig / contract upgrade path for the admin role
 - [ ] Real events-based (or indexed) escrow lookup, replacing the client-side `0..count` scan
@@ -154,6 +190,10 @@ Covers initialization (including double-init and an over-the-cap fee getting rej
 ## Contributing
 
 Bug reports, contract review, and frontend help are all welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for coding conventions, PR expectations, and a milestone breakdown aimed at people picking this up through Drips, the Stellar Community Fund, GrantFox, or Gitcoin.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the self-review log, known accepted risks, and how to report a vulnerability.
 
 ## License
 

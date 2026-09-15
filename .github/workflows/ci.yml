@@ -1,0 +1,78 @@
+name: CI
+
+# Runs on every push to main and every PR. Two independent jobs — contract
+# and frontend — so a change to one doesn't wait on (or get blocked by) the
+# other, and a reviewer can see at a glance which half of the repo broke.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Contract (fmt, clippy, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml at the repo root pins the channel and the
+      # wasm32v1-none target; rustup resolves both automatically the first
+      # time cargo runs, so no separate toolchain-install step is needed.
+      - name: Show resolved toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Check formatting
+        run: cargo fmt -p flashwage-escrow -- --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy -p flashwage-escrow --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p flashwage-escrow
+
+      - name: Build deployable wasm
+        run: cargo build -p flashwage-escrow --target wasm32v1-none --release
+
+  frontend:
+    name: Frontend (lint, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        # No NEXT_PUBLIC_* env vars are set here on purpose — the app is
+        # designed to build and render with an empty config (showing
+        # "Contract not connected" instead of crashing), and this is the
+        # cheapest way to keep that contract honest in CI.
+        run: npm run build

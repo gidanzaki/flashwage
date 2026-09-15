@@ -16,7 +16,10 @@ use soroban_sdk::{
 /// Deploys a Stellar Asset Contract instance for use as a test token, returning
 /// its address plus SEP-41 (`TokenClient`) and asset-admin (`StellarAssetClient`)
 /// clients for it.
-fn create_token<'a>(env: &Env, admin: &Address) -> (Address, TokenClient<'a>, StellarAssetClient<'a>) {
+fn create_token<'a>(
+    env: &Env,
+    admin: &Address,
+) -> (Address, TokenClient<'a>, StellarAssetClient<'a>) {
     let sac = env.register_stellar_asset_contract_v2(admin.clone());
     let address = sac.address();
     (
@@ -105,6 +108,24 @@ fn initialize_rejects_excessive_fee() {
 
     let result = contract.try_initialize(&admin, &Vec::new(&env), &1_001, &fee_vault);
     assert_eq!(result, Err(Ok(Error::FeeTooHigh)));
+}
+
+#[test]
+fn initialize_rejects_too_many_accepted_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let fee_vault = Address::generate(&env);
+    let contract_id = env.register(FlashWageEscrow, ());
+    let contract = FlashWageEscrowClient::new(&env, &contract_id);
+
+    let mut too_many = Vec::new(&env);
+    for _ in 0..21 {
+        too_many.push_back(Address::generate(&env));
+    }
+
+    let result = contract.try_initialize(&admin, &too_many, &50, &fee_vault);
+    assert_eq!(result, Err(Ok(Error::TooManyAcceptedAssets)));
 }
 
 #[test]
@@ -213,7 +234,10 @@ fn release_by_admin_is_allowed() {
     );
 
     f.contract.release_payout(&f.admin, &escrow_id);
-    assert_eq!(f.contract.get_escrow(&escrow_id).status, EscrowStatus::Released);
+    assert_eq!(
+        f.contract.get_escrow(&escrow_id).status,
+        EscrowStatus::Released
+    );
 }
 
 #[test]
@@ -252,7 +276,10 @@ fn auto_release_after_deadline_by_anyone() {
     f.env.ledger().with_mut(|li| li.timestamp = 2_001);
     f.contract.release_payout(&f.worker, &escrow_id);
 
-    assert_eq!(f.contract.get_escrow(&escrow_id).status, EscrowStatus::Released);
+    assert_eq!(
+        f.contract.get_escrow(&escrow_id).status,
+        EscrowStatus::Released
+    );
     assert!(f.token.balance(&f.worker) > 0);
 }
 
@@ -309,7 +336,10 @@ fn cancel_after_deadline_refunds_employer() {
     f.contract.cancel_escrow(&f.employer, &escrow_id);
 
     assert_eq!(f.token.balance(&f.employer), balance_after_lock + 10_000);
-    assert_eq!(f.contract.get_escrow(&escrow_id).status, EscrowStatus::Canceled);
+    assert_eq!(
+        f.contract.get_escrow(&escrow_id).status,
+        EscrowStatus::Canceled
+    );
 }
 
 #[test]

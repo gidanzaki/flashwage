@@ -48,12 +48,16 @@ These map roughly to the roadmap in the README, sized so a reviewer (or you) can
 | M2 — Employer dashboard | Freighter connect, create-escrow form, active escrows list with a release trigger | M | ✅ Built — see caveat below |
 | M3 — Worker payout portal | View pending/completed milestones by wallet address, withdraw via a Path Payment into a local stablecoin | M | ✅ Built — see caveat below |
 | M4 — Analytics banner | TVL, total disbursements, average settlement time — reading from contract state, not hardcoded | S | ✅ Built — see caveat below |
-| M7 — First live verification | Deploy the contract to testnet, wire up `.env.local`, and actually click through both dashboards with Freighter against it. This is the milestone that turns "it builds" into "it works" — fixing whatever breaks along the way is the point of it | M | **Open — good place to start** |
+| M7 — First live verification | Deploy the contract to testnet, wire up `.env.local`, and exercise every contract call end-to-end. Done via `stellar contract invoke` and by calling `lib/contract.ts`'s own functions directly against the live RPC — caught and fixed a real Result-unwrapping bug (see README "Live on testnet") and two unrelated dependency vulnerabilities (one critical) in the process | M | ✅ Done |
+| M12 — Browser click-through | Everything in M7 called the same underlying functions directly; nobody has clicked the UI's own buttons with the Freighter extension installed yet. **Good place to start** if you want the shortest path to a real contribution | S | **Open — good place to start** |
 | M5 — Passkey wallet support | Stellar passkey template alongside Freighter, so users without a browser extension can still sign | M | Open |
 | M6 — Admin key hardening | Multi-sig or timelock in front of the admin role, contract upgrade path | L | Open |
 | M8 — Indexed escrow lookup | Replace the client-side `0..get_escrow_count()` scan in `lib/contract.ts` with real event-based (or backend-indexed) lookup | M | Open |
+| M9 — CI | GitHub Actions running contract fmt/clippy/test/build and frontend lint/test/build on every push/PR | S | ✅ Done |
+| M10 — Frontend test coverage | Vitest suite for the bigint/decimal formatting and ScVal-decoding logic | S | ✅ Done |
+| M11 — Reentrancy regression test | A mock token contract whose `transfer` calls back into `release_payout`/`cancel_escrow`, proving the checks-effects-interactions fix (see [SECURITY.md](SECURITY.md)) actually holds rather than just reasoning about it | M | Open |
 
-**Caveat on M2–M4:** these are written, and they build/typecheck/lint clean, but nobody has deployed the contract and clicked through them against a live network with a real wallet yet — that's M7. If you pick up M7 and find something in the M2–M4 code that doesn't actually work end-to-end, fixing it *is* the contribution; open a PR rather than a bug report if you're already there.
+**Caveat on M2–M4:** the code they call (`lib/contract.ts`'s reads and writes) has been verified against a live testnet deployment — see the README's "Live on testnet" — but that was done by calling those functions directly, not by clicking the actual UI with Freighter installed. That last gap is M12. If you pick that up and find something in the M2–M4 components that doesn't actually work end-to-end, fixing it *is* the contribution; open a PR rather than a bug report if you're already there.
 
 Good first issues (once filed) will be tagged `good-first-issue` — those are intentionally scoped to be doable without a deep-dive into the whole codebase first.
 

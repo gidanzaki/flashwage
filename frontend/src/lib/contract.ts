@@ -1,4 +1,4 @@
-import { Client } from "@stellar/stellar-sdk/contract";
+import { Client, type Result } from "@stellar/stellar-sdk/contract";
 import { ESCROW_CONTRACT_ID, NETWORK_PASSPHRASE, SOROBAN_RPC_URL } from "./constants";
 import type { Escrow, EscrowStatus, PlatformConfig } from "./types";
 import { signTransaction } from "./wallet";
@@ -13,6 +13,18 @@ import { signTransaction } from "./wallet";
  * functions (there are only six, so this is easy to keep honest — if this
  * project grows a code-generation step via `stellar contract bindings
  * typescript`, this file is what that would replace).
+ *
+ * Every Rust function here that returns `Result<T, Error>` — every one
+ * except `get_escrow_count`, which just returns `u64` — comes back from the
+ * SDK as a `Result<T>` wrapper (`.unwrap()` / `.isOk()` / `.isErr()`), not as
+ * `T` directly. This isn't a version quirk to work around once; it's the
+ * SDK's actual `AssembledTransaction`/`SentTransaction` contract for any
+ * Result-returning method, confirmed by exercising every one of these calls
+ * against a real deployed instance of this contract on testnet — the raw
+ * shape a `Result<T, Error>` method's `.result` field is *actually* `{ value:
+ * T }` (`Ok`) or `{ error: { message } }` (`Err`), not `T` itself. Missing
+ * this earlier is exactly why that verification mattered more than the type
+ * checker compiling cleanly.
  */
 
 interface RawEscrow {
@@ -46,25 +58,36 @@ interface ContractMethods {
       description: string;
     },
     options?: MethodOptions
-  ): Promise<{ signAndSend(): Promise<{ result: bigint }>; result: bigint }>;
+  ): Promise<{
+    signAndSend(): Promise<{ result: Result<bigint> }>;
+    result: Result<bigint>;
+  }>;
 
   release_payout(
     args: { caller: string; escrow_id: bigint },
     options?: MethodOptions
-  ): Promise<{ signAndSend(): Promise<{ result: void }>; result: void }>;
+  ): Promise<{
+    signAndSend(): Promise<{ result: Result<void> }>;
+    result: Result<void>;
+  }>;
 
   cancel_escrow(
     args: { employer: string; escrow_id: bigint },
     options?: MethodOptions
-  ): Promise<{ signAndSend(): Promise<{ result: void }>; result: void }>;
+  ): Promise<{
+    signAndSend(): Promise<{ result: Result<void> }>;
+    result: Result<void>;
+  }>;
 
   get_escrow(
     args: { escrow_id: bigint },
     options?: MethodOptions
-  ): Promise<{ result: RawEscrow }>;
+  ): Promise<{ result: Result<RawEscrow> }>;
 
-  get_config(options?: MethodOptions): Promise<{ result: RawConfig }>;
+  get_config(options?: MethodOptions): Promise<{ result: Result<RawConfig> }>;
 
+  // The only method whose Rust signature doesn't return a Result — plain u64
+  // straight through, no unwrap() needed.
   get_escrow_count(options?: MethodOptions): Promise<{ result: bigint }>;
 }
 
@@ -102,7 +125,7 @@ async function getWriteClient(address: string): Promise<FlashWageClient> {
   return client as FlashWageClient;
 }
 
-function fromRawEscrow(raw: RawEscrow): Escrow {
+export function fromRawEscrow(raw: RawEscrow): Escrow {
   return {
     id: raw.id,
     employer: raw.employer,
@@ -116,7 +139,7 @@ function fromRawEscrow(raw: RawEscrow): Escrow {
   };
 }
 
-function fromRawConfig(raw: RawConfig): PlatformConfig {
+export function fromRawConfig(raw: RawConfig): PlatformConfig {
   return {
     admin: raw.admin,
     acceptedAssets: raw.accepted_assets,
@@ -128,9 +151,10 @@ function fromRawConfig(raw: RawConfig): PlatformConfig {
 /** Turns whatever the SDK throws into a message worth showing a user. */
 export function describeContractError(err: unknown): string {
   if (err instanceof Error) {
-    // AssembledTransaction wraps parsed #[contracterror] variants in a
-    // `.message` that includes the variant name — good enough for an MVP
-    // without a full error-code-to-copy mapping table.
+    // Result.unwrap() throws `new Error(this.error.message)` for a parsed
+    // #[contracterror] variant, so `.message` is already the variant name
+    // (e.g. "EscrowNotFound") — good enough for an MVP without a full
+    // error-code-to-copy mapping table.
     return err.message;
   }
   return "Something went wrong talking to the contract.";
@@ -140,7 +164,7 @@ export async function fetchEscrow(escrowId: bigint): Promise<Escrow | null> {
   try {
     const client = await getReadClient();
     const { result } = await client.get_escrow({ escrow_id: escrowId });
-    return fromRawEscrow(result);
+    return fromRawEscrow(result.unwrap());
   } catch {
     return null; // most commonly: EscrowNotFound
   }
@@ -156,7 +180,7 @@ export async function fetchConfig(): Promise<PlatformConfig | null> {
   try {
     const client = await getReadClient();
     const { result } = await client.get_config();
-    return fromRawConfig(result);
+    return fromRawConfig(result.unwrap());
   } catch {
     return null; // most commonly: contract not initialized yet
   }
@@ -199,17 +223,19 @@ export async function createMilestoneEscrow(params: {
     description: params.description,
   });
   const sent = await tx.signAndSend();
-  return sent.result;
+  return sent.result.unwrap();
 }
 
 export async function releasePayout(params: { caller: string; escrowId: bigint }): Promise<void> {
   const client = await getWriteClient(params.caller);
   const tx = await client.release_payout({ caller: params.caller, escrow_id: params.escrowId });
-  await tx.signAndSend();
+  const sent = await tx.signAndSend();
+  sent.result.unwrap();
 }
 
 export async function cancelEscrow(params: { employer: string; escrowId: bigint }): Promise<void> {
   const client = await getWriteClient(params.employer);
   const tx = await client.cancel_escrow({ employer: params.employer, escrow_id: params.escrowId });
-  await tx.signAndSend();
+  const sent = await tx.signAndSend();
+  sent.result.unwrap();
 }

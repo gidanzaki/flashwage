@@ -118,6 +118,7 @@ pub enum Error {
     Unauthorized = 8,
     DeadlineNotReached = 9,
     FeeTooHigh = 10,
+    TooManyAcceptedAssets = 11,
 }
 
 // --- Events ------------------------------------------------------------
@@ -161,6 +162,11 @@ pub struct EscrowCanceled {
 /// requests at `initialize`. Guards workers against a misconfigured or malicious
 /// admin siphoning an unreasonable cut.
 const MAX_FEE_BPS: u32 = 1_000;
+/// Hard ceiling on how many tokens `initialize` can whitelist. `Config` is
+/// read in full on every escrow operation, so an unbounded list would make
+/// every call progressively more expensive to simulate/execute — this keeps
+/// that cost bounded regardless of what an admin passes in.
+const MAX_ACCEPTED_ASSETS: u32 = 20;
 const BPS_DENOMINATOR: i128 = 10_000;
 
 // --- Storage TTL tuning -----------------------------------------------------
@@ -190,6 +196,8 @@ impl FlashWageEscrow {
     /// # Errors
     /// - [`Error::AlreadyInitialized`] if called more than once.
     /// - [`Error::FeeTooHigh`] if `platform_fee_bps` exceeds [`MAX_FEE_BPS`].
+    /// - [`Error::TooManyAcceptedAssets`] if `accepted_assets` exceeds
+    ///   [`MAX_ACCEPTED_ASSETS`].
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -202,6 +210,9 @@ impl FlashWageEscrow {
         }
         if platform_fee_bps > MAX_FEE_BPS {
             return Err(Error::FeeTooHigh);
+        }
+        if accepted_assets.len() > MAX_ACCEPTED_ASSETS {
+            return Err(Error::TooManyAcceptedAssets);
         }
 
         admin.require_auth();
@@ -264,7 +275,7 @@ impl FlashWageEscrow {
         // `token::Client` speaks the standard SEP-41 token interface, so this
         // works for the native XLM SAC, USDC, or any other Stellar Asset Contract.
         let token_client = token::Client::new(&env, &token_address);
-        token_client.transfer(&employer, &env.current_contract_address(), &amount);
+        token_client.transfer(&employer, env.current_contract_address(), &amount);
 
         let escrow_id: u64 = env
             .storage()
@@ -350,8 +361,24 @@ impl FlashWageEscrow {
         let platform_fee = (escrow.amount * config.platform_fee_bps as i128) / BPS_DENOMINATOR;
         let worker_amount = escrow.amount - platform_fee;
 
+        // Checks-effects-interactions: flip the status to `Released` *before*
+        // making the external token transfer calls below. `accepted_assets`
+        // is admin-curated and expected to hold only vetted SAC-style tokens
+        // with no callback hooks, but that's a policy guarantee, not one this
+        // contract enforces in code — if a future admin ever adds a token
+        // whose `transfer` implementation calls back into this contract, the
+        // status is already `Released` by the time that happens, so a
+        // reentrant `release_payout`/`cancel_escrow` call on the same escrow
+        // hits the `EscrowNotActive` check instead of paying out twice.
+        escrow.status = EscrowStatus::Released;
+        Self::write_escrow(&env, escrow_id, &escrow);
+
         let token_client = token::Client::new(&env, &escrow.token);
-        token_client.transfer(&env.current_contract_address(), &escrow.worker, &worker_amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &escrow.worker,
+            &worker_amount,
+        );
         if platform_fee > 0 {
             token_client.transfer(
                 &env.current_contract_address(),
@@ -359,9 +386,6 @@ impl FlashWageEscrow {
                 &platform_fee,
             );
         }
-
-        escrow.status = EscrowStatus::Released;
-        Self::write_escrow(&env, escrow_id, &escrow);
 
         EscrowReleased {
             escrow_id,
@@ -402,16 +426,18 @@ impl FlashWageEscrow {
             return Err(Error::DeadlineNotReached);
         }
 
+        // Checks-effects-interactions, same reasoning as in `release_payout`:
+        // flip the status before the external transfer, not after.
+        let refunded_amount = escrow.amount;
+        escrow.status = EscrowStatus::Canceled;
+        Self::write_escrow(&env, escrow_id, &escrow);
+
         let token_client = token::Client::new(&env, &escrow.token);
         token_client.transfer(
             &env.current_contract_address(),
             &escrow.employer,
-            &escrow.amount,
+            &refunded_amount,
         );
-
-        let refunded_amount = escrow.amount;
-        escrow.status = EscrowStatus::Canceled;
-        Self::write_escrow(&env, escrow_id, &escrow);
 
         EscrowCanceled {
             escrow_id,
@@ -468,9 +494,11 @@ impl FlashWageEscrow {
     fn write_escrow(env: &Env, escrow_id: u64, escrow: &Escrow) {
         let key = DataKey::Escrow(escrow_id);
         env.storage().persistent().set(&key, escrow);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
     }
 }
 
